@@ -536,7 +536,10 @@ void StateTranslationVisitor::processMethod(const P4::ExternMethod *method) {
 }
 
 bool StateTranslationVisitor::preorder(const IR::MethodCallExpression *expression) {
-    if (commentDescriptionDepth == 0) builder->append("/* ");
+    if (commentDescriptionDepth == 0) {
+      builder->emitIndent();
+      builder->append("/* ");
+    }
     commentDescriptionDepth++;
     visit(expression->method);
     builder->append("(");

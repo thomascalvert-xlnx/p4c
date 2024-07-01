@@ -54,6 +54,7 @@ void ControlBodyTranslator::processCustomExternFunction(const P4::ExternFunction
     if (!control->emitExterns)
         ::error(ErrorType::ERR_UNSUPPORTED, "%1%: Not supported", function->method);
 
+    builder->emitIndent();
     visit(function->expr->method);
     builder->append("(");
     bool first = true;

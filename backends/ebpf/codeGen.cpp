@@ -380,6 +380,7 @@ void CodeGenInspector::emitAssignStatement(const IR::Type *ltype, const IR::Expr
         }
     }
     builder->endOfStatement();
+    builder->newline();
 }
 
 bool CodeGenInspector::preorder(const IR::AssignmentStatement *a) {
