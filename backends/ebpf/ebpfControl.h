@@ -44,6 +44,8 @@ class ControlBodyTranslator : public virtual CodeGenInspector {
     virtual void processFunction(const P4::ExternFunction *function);
     void processCustomExternFunction(const P4::ExternFunction *function,
                                      EBPFTypeFactory *typeFactory);
+    void processCustomExternMethod(const P4::ExternMethod *method,
+                                   EBPFTypeFactory *typeFactory);
 
     bool preorder(const IR::PathExpression *expression) override;
     bool preorder(const IR::MethodCallExpression *expression) override;
