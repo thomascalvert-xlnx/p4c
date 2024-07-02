@@ -45,6 +45,7 @@ class StateTranslationVisitor : public CodeGenInspector {
 
     virtual void processFunction(const P4::ExternFunction *function);
     virtual void processMethod(const P4::ExternMethod *method);
+    void processCustomExternMethod(const P4::ExternMethod *method);
 
  public:
     explicit StateTranslationVisitor(P4::ReferenceMap *refMap, P4::TypeMap *typeMap)
@@ -86,6 +87,7 @@ class EBPFParser : public EBPFObject {
     const IR::Parameter *headers;
     const IR::Parameter *user_metadata;
     EBPFType *headerType;
+    const bool emitExterns;
 
     StateTranslationVisitor *visitor;
 
