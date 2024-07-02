@@ -562,10 +562,14 @@ void EBPFControl::scanConstants() {
             auto ctrblk = b->to<IR::ExternBlock>();
             auto node = ctrblk->node;
             if (node->is<IR::Declaration_Instance>()) {
+                const IR::Type_Extern* extType = ctrblk->type;
                 auto di = node->to<IR::Declaration_Instance>();
                 cstring name = EBPFObject::externalName(di);
-                auto ctr = new EBPFCounterTable(program, ctrblk, name, codeGen);
-                counters.emplace(name, ctr);
+                // Defined in ebpf_model.p4
+                if (extType->name.name == EBPFModel::instance.counterArray.name) {
+                    auto ctr = new EBPFCounterTable(program, ctrblk, name, codeGen);
+                    counters.emplace(name, ctr);
+                }
             }
         } else {
             ::error(ErrorType::ERR_UNEXPECTED, "Unexpected block %s nested within control",
