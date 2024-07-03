@@ -555,7 +555,7 @@ void StateTranslationVisitor::processMethod(const P4::ExternMethod *method) {
             compileAdvance(method);
             return;
         }
-        BUG("Unhandled packet method %1%", expression->method);
+//        BUG("Unhandled packet method %1%", expression->method);
     }
 
     processCustomExternMethod(method);

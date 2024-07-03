@@ -45,7 +45,8 @@ class Target(EBPFTarget):
         args += f"INCLUDES+=-I{self.runtimedir}/contrib/libbpf/src "
         if self.options.extern:
             # we inline the extern so we need a direct include
-            args += f"INCLUDES+=-include{self.options.extern} "
+            #args += f"INCLUDES+=-include{self.options.extern} "
+            args += f"EXTERNOBJ={self.options.extern} "
             # need to include the temporary dir because of the tmp import
             args += f"INCLUDES+=-I{self.tmpdir} "
         result = testutils.exec_process(args)
