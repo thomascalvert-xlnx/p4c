@@ -113,7 +113,7 @@ unsigned EBPFScalarType::alignment() const {
 }
 
 void EBPFScalarType::emit(CodeBuilder *builder) {
-    auto prefix = isSigned ? "i" : "u";
+    auto prefix = isSigned ? "s" : "u";
 
     if (width <= 8)
         builder->appendFormat("%s8", prefix);
