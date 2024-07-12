@@ -35,7 +35,7 @@ void StateTranslationVisitor::compileLookahead(const IR::Expression *destination
     builder->appendFormat("u8* %s_save = %s", state->parser->program->headerStartVar.c_str(),
                           state->parser->program->headerStartVar.c_str());
     builder->endOfStatement(true);
-    compileExtract(destination);
+    compileExtract(destination, /*lookahead=*/ true);
     builder->emitIndent();
     builder->appendFormat("%s = %s_save", state->parser->program->headerStartVar.c_str(),
                           state->parser->program->headerStartVar.c_str());
@@ -274,13 +274,12 @@ bool StateTranslationVisitor::preorder(const IR::SelectCase *selectCase) {
 }
 
 void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
-                                                  const IR::StructField *field,
+                                                  cstring fieldName,
                                                   unsigned hdrOffsetBits, EBPFType *type) {
     unsigned alignment = hdrOffsetBits % 8;
     unsigned widthToExtract = type->as<IHasWidth>().widthInBits();
     auto program = state->parser->program;
     cstring msgStr;
-    cstring fieldName = field->name.name;
 
     msgStr = absl::StrFormat("Parser: extracting field %s", fieldName);
     builder->target->emitTraceMessage(builder, msgStr.c_str());
@@ -311,7 +310,10 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
         unsigned shift = loadSize - alignment - widthToExtract;
         builder->emitIndent();
         visit(expr);
-        builder->appendFormat(".%s = (", fieldName.c_str());
+        if (!fieldName.isNullOrEmpty())
+            builder->appendFormat(".%s = (", fieldName.c_str());
+        else
+            builder->appendFormat(" = (");
         type->emit(builder);
         builder->appendFormat(")((%s(%s, BYTES(%u))", helper, program->headerStartVar.c_str(),
                               hdrOffsetBits);
@@ -341,7 +343,7 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
             ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
                     "%1%: fields wider than 64 bits must have a size multiple of 8 bits (1 byte) "
                     "due to ambiguous padding in the LSB byte when the condition is not met",
-                    field);
+                    fieldName);
         }
 
         // wide values; read all bytes one by one.
@@ -361,7 +363,10 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
         for (unsigned i = 0; i < bytes; i++) {
             builder->emitIndent();
             visit(expr);
-            builder->appendFormat(".%s[%d] = (", fieldName.c_str(), i);
+            if (!fieldName.isNullOrEmpty())
+                builder->appendFormat(".%s[%d] = (", fieldName.c_str(), i);
+            else
+                builder->appendFormat("[%d] = (", i);
             bt->emit(builder);
             builder->appendFormat(")((%s(%s, BYTES(%u) + %d) >> %d)", helper,
                                   program->headerStartVar.c_str(), hdrOffsetBits, i, shift);
@@ -400,21 +405,33 @@ void StateTranslationVisitor::compileExtractField(const IR::Expression *expr,
     }
 }
 
-void StateTranslationVisitor::compileExtract(const IR::Expression *destination) {
+void StateTranslationVisitor::compileExtract(const IR::Expression *destination,
+                                             bool lookahead) {
     cstring msgStr;
     auto type = state->parser->typeMap->getType(destination);
     auto ht = type->to<IR::Type_StructLike>();
-    if (ht == nullptr) {
-        ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "Cannot extract to a non-struct type %1%",
-                destination);
-        return;
-    }
+    auto it = type->to<IR::Type_Bits>();
 
-    // We expect all headers to start on a byte boundary.
-    unsigned width = ht->width_bits();
-    if ((width % 8) != 0) {
+    unsigned width = 0;
+    if (ht) {
+        // We expect all headers to start on a byte boundary.
+        width = ht->width_bits();
+        if ((width % 8) != 0) {
+            ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
+                    "Header %1% size %2% is not a multiple of 8 bits.", destination, width);
+            return;
+        }
+    } else if (it) {
+        // Bit-strings need to be multiple of bytes, or not update the packet offset
+        width = it->width_bits();
+        if (((width % 8) != 0) && !lookahead) {
+            ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
+                    "Bit-string %1% size %2% is not a multiple of 8 bits.", destination, width);
+            return;
+        }
+    } else {
         ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
-                "Header %1% size %2% is not a multiple of 8 bits.", destination, width);
+                "Destination %1% not supported for extraction.", destination, width);
         return;
     }
 
@@ -426,6 +443,23 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination) 
     builder->target->emitTraceMessage(builder, "Parser: check pkt_len=%d >= last_read_byte=%d", 2,
                                       program->lengthVar.c_str(), offsetStr.c_str());
 
+    struct TyNm {
+        const IR::Type *type;
+        cstring     name;
+        TyNm(const IR::Type *type, cstring name) : type(type), name(name) {}
+    };
+    std::vector<TyNm> fields;
+
+    // Harmonize fields from structs / headers and direct extraction of bit-strings
+    if (ht) {
+        for (auto f : ht->fields) {
+            auto ftype = state->parser->typeMap->getType(f);
+            fields.emplace_back(ftype, f->name.name);
+        }
+    } else {
+        fields.emplace_back(it, ""_cs);
+    }
+
     // to load some fields the compiler will use larger words
     // than actual width of a field (e.g. 48-bit field loaded using load_dword())
     // we must ensure that the larger word is not outside of packet buffer.
@@ -433,9 +467,8 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination) 
     //  However, we don't have better solution in case of using load_X functions to parse packet.
     // TODO: consider using a collection of smaller widths.
     unsigned curr_padding = 0;
-    for (auto f : ht->fields) {
-        auto ftype = state->parser->typeMap->getType(f);
-        auto etype = EBPFTypeFactory::instance->create(ftype);
+    for (auto &f : fields) {
+        auto etype = EBPFTypeFactory::instance->create(f.type);
         if (etype->is<EBPFScalarType>()) {
             auto scalarType = etype->to<EBPFScalarType>();
             unsigned readWordSize = scalarType->alignment() * 8;
@@ -469,21 +502,21 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination) 
     builder->newline();
 
     unsigned hdrOffsetBits = 0;
-    for (auto f : ht->fields) {
-        auto ftype = state->parser->typeMap->getType(f);
+    for (auto &f : fields) {
+        auto ftype = f.type;
         auto etype = EBPFTypeFactory::instance->create(ftype);
         auto et = etype->to<IHasWidth>();
         if (et == nullptr) {
             ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET,
-                    "Only headers with fixed widths supported %1%", f);
+                    "Only headers with fixed widths supported %1%", f.name);
             return;
         }
-        compileExtractField(destination, f, hdrOffsetBits, etype);
+        compileExtractField(destination, f.name, hdrOffsetBits, etype);
         hdrOffsetBits += et->widthInBits();
     }
     builder->newline();
 
-    if (ht->is<IR::Type_Header>()) {
+    if (ht && ht->is<IR::Type_Header>()) {
         builder->emitIndent();
         visit(destination);
         builder->appendLine(".ebpf_valid = 1;");
