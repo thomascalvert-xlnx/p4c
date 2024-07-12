@@ -28,19 +28,7 @@ void StateTranslationVisitor::compileLookahead(const IR::Expression *destination
                                      state->parser->typeMap->getType(destination)->toString(),
                                      destination->toString());
     builder->target->emitTraceMessage(builder, msgStr.c_str());
-
-    builder->emitIndent();
-    builder->blockStart();
-    builder->emitIndent();
-    builder->appendFormat("u8* %s_save = %s", state->parser->program->headerStartVar.c_str(),
-                          state->parser->program->headerStartVar.c_str());
-    builder->endOfStatement(true);
     compileExtract(destination, /*lookahead=*/ true);
-    builder->emitIndent();
-    builder->appendFormat("%s = %s_save", state->parser->program->headerStartVar.c_str(),
-                          state->parser->program->headerStartVar.c_str());
-    builder->endOfStatement(true);
-    builder->blockEnd(true);
 }
 
 void StateTranslationVisitor::compileAdvance(const P4::ExternMethod *extMethod) {
@@ -522,10 +510,12 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination,
         builder->appendLine(".ebpf_valid = 1;");
     }
 
-    // Increment header pointer
-    builder->emitIndent();
-    builder->appendFormat("%s += BYTES(%u);", program->headerStartVar.c_str(), width);
-    builder->newline();
+    if (!lookahead) {
+        // Increment header pointer
+        builder->emitIndent();
+        builder->appendFormat("%s += BYTES(%u);", program->headerStartVar.c_str(), width);
+        builder->newline();
+    }
 
     msgStr = absl::StrFormat("Parser: extracted %s", destination->toString());
     builder->target->emitTraceMessage(builder, msgStr.c_str());
