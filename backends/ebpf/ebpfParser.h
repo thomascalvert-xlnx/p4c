@@ -45,6 +45,8 @@ class StateTranslationVisitor : public CodeGenInspector {
 
     virtual void processFunction(const P4::ExternFunction *function);
     virtual void processMethod(const P4::ExternMethod *method);
+    void emitMCEComment(const IR::MethodCallExpression *mce,
+                        const IR::Type *type = nullptr);
 
  public:
     explicit StateTranslationVisitor(P4::ReferenceMap *refMap, P4::TypeMap *typeMap)

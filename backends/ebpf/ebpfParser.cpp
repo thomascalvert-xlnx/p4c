@@ -114,6 +114,34 @@ void StateTranslationVisitor::compileVerify(const IR::MethodCallExpression *expr
     builder->blockEnd(true);
 }
 
+void StateTranslationVisitor::emitMCEComment(const IR::MethodCallExpression *mce,
+                                             const IR::Type *type) {
+    if (commentDescriptionDepth == 0) {
+        builder->emitIndent();
+        builder->append("/* ");
+    }
+    commentDescriptionDepth++;
+    visit(mce->method);
+    if (type) {
+        builder->append("<");
+        builder->append(type->toString());
+        builder->append(">");
+    }
+    builder->append("(");
+    bool first = true;
+    for (auto a : *mce->arguments) {
+        if (!first) builder->append(", ");
+        first = false;
+        visit(a);
+    }
+    builder->append(")");
+    if (commentDescriptionDepth == 1) {
+        builder->append(" */");
+        builder->newline();
+    }
+    commentDescriptionDepth--;
+}
+
 bool StateTranslationVisitor::preorder(const IR::AssignmentStatement *statement) {
     if (auto mce = statement->right->to<IR::MethodCallExpression>()) {
         auto mi = P4::MethodInstance::resolve(mce, state->parser->program->refMap,
@@ -124,6 +152,7 @@ bool StateTranslationVisitor::preorder(const IR::AssignmentStatement *statement)
         auto decl = extMethod->object;
         if (decl == state->parser->packet) {
             if (extMethod->method->name.name == p4lib.packetIn.lookahead.name) {
+                emitMCEComment(mce, mce->type);
                 compileLookahead(statement->left);
                 return false;
             } else if (extMethod->method->name.name == p4lib.packetIn.length.name) {
@@ -559,23 +588,7 @@ void StateTranslationVisitor::processMethod(const P4::ExternMethod *method) {
 }
 
 bool StateTranslationVisitor::preorder(const IR::MethodCallExpression *expression) {
-    if (commentDescriptionDepth == 0) builder->append("/* ");
-    commentDescriptionDepth++;
-    visit(expression->method);
-    builder->append("(");
-    bool first = true;
-    for (auto a : *expression->arguments) {
-        if (!first) builder->append(", ");
-        first = false;
-        visit(a);
-    }
-    builder->append(")");
-    if (commentDescriptionDepth == 1) {
-        builder->append(" */");
-        builder->newline();
-    }
-    commentDescriptionDepth--;
-
+    emitMCEComment(expression);
     // do not process extern when comment is generated
     if (commentDescriptionDepth != 0) return false;
 
