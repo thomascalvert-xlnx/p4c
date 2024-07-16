@@ -254,6 +254,7 @@ p4c_add_tests("ebpf-errors" ${EBPF_DRIVER_TEST} ${EBPF_ERRORS_SUITES} "${XFAIL_T
 
 # These are special tests with args that are not included in the default ebpf tests
 p4c_add_test_with_args("ebpf" ${EBPF_DRIVER_TEST} FALSE "testdata/p4_16_samples/ebpf_checksum_extern.p4" "testdata/p4_16_samples/ebpf_checksum_extern.p4" "--extern-file ${P4C_SOURCE_DIR}/testdata/extern_modules/extern-checksum-ebpf.c" "")
+p4c_add_test_with_args("ebpf" ${EBPF_DRIVER_TEST} FALSE "testdata/p4_16_samples/ebpf_extern_object.p4" "testdata/p4_16_samples/ebpf_extern_object.p4" "--extern-file ${P4C_SOURCE_DIR}/testdata/extern_modules/extern-object-ebpf.cpp" "")
 # FIXME:This does not work yet
 # We do not have support for dynamic addition of tables in the test framework
 p4c_add_test_with_args("ebpf" ${EBPF_DRIVER_TEST} TRUE "testdata/p4_16_samples/ebpf_conntrack_extern.p4" "testdata/p4_16_samples/ebpf_conntrack_extern.p4" "--extern-file ${P4C_SOURCE_DIR}/testdata/extern_modules/extern-conntrack-ebpf.c" "")

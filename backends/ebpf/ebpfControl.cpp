@@ -54,6 +54,7 @@ void ControlBodyTranslator::processCustomExternFunction(const P4::ExternFunction
     if (!control->emitExterns)
         ::error(ErrorType::ERR_UNSUPPORTED, "%1%: Not supported", function->method);
 
+    builder->emitIndent();
     visit(function->expr->method);
     builder->append("(");
     bool first = true;
@@ -80,6 +81,38 @@ void ControlBodyTranslator::processCustomExternFunction(const P4::ExternFunction
 
 void ControlBodyTranslator::processFunction(const P4::ExternFunction *function) {
     processCustomExternFunction(function, EBPFTypeFactory::instance);
+}
+
+void ControlBodyTranslator::processCustomExternMethod(const P4::ExternMethod *method,
+                                                      EBPFTypeFactory *typeFactory)
+{
+    if (!control->emitExterns)
+        ::error(ErrorType::ERR_UNSUPPORTED, "%1%: Not supported", method->method);
+
+    builder->emitIndent();
+    // Custom extern objects: this visit() call will emit "objName.methodName".
+    visit(method->expr->method);
+    builder->append("(");
+    bool first = true;
+
+    for (auto p : *method->substitution.getParametersInArgumentOrder()) {
+        if (!first) builder->append(", ");
+        first = false;
+        auto arg = method->substitution.lookup(p);
+        if (p->direction == IR::Direction::Out || p->direction == IR::Direction::InOut) {
+            builder->append("&");
+        } else if (p->direction == IR::Direction::In) {
+            builder->append("(const ");
+            auto type = typeMap->getType(arg);
+            auto ebpfType = typeFactory->create(type);
+            ebpfType->declare(builder, cstring::empty, false);
+            builder->append(") ");
+        }
+        visit(arg);
+    }
+
+    builder->append(")");
+    builder->endOfStatement(true);
 }
 
 bool ControlBodyTranslator::preorder(const IR::MethodCallExpression *expression) {
@@ -295,7 +328,8 @@ void ControlBodyTranslator::processMethod(const P4::ExternMethod *method) {
             return;
         }
     }
-    ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "%1%: Unexpected method call", method->expr);
+    // Could be a user-defined extern.
+    processCustomExternMethod(method, EBPFTypeFactory::instance);
 }
 
 void ControlBodyTranslator::processApply(const P4::ApplyMethod *method) {
@@ -528,10 +562,14 @@ void EBPFControl::scanConstants() {
             auto ctrblk = b->to<IR::ExternBlock>();
             auto node = ctrblk->node;
             if (node->is<IR::Declaration_Instance>()) {
+                const IR::Type_Extern* extType = ctrblk->type;
                 auto di = node->to<IR::Declaration_Instance>();
                 cstring name = EBPFObject::externalName(di);
-                auto ctr = new EBPFCounterTable(program, ctrblk, name, codeGen);
-                counters.emplace(name, ctr);
+                // Defined in ebpf_model.p4
+                if (extType->name.name == EBPFModel::instance.counterArray.name) {
+                    auto ctr = new EBPFCounterTable(program, ctrblk, name, codeGen);
+                    counters.emplace(name, ctr);
+                }
             }
         } else {
             ::error(ErrorType::ERR_UNEXPECTED, "Unexpected block %s nested within control",
@@ -605,6 +643,29 @@ void EBPFControl::emitDeclaration(CodeBuilder *builder, const IR::Declaration *d
 
         BUG_CHECK(vd->initializer == nullptr, "%1%: declarations with initializers not supported",
                   decl);
+        return;
+    } else if (decl->is<IR::Declaration_Instance>()) {
+        const IR::Declaration_Instance* di = decl->to<IR::Declaration_Instance>();
+        const IR::Type* ty = di->getType();
+        builder->emitIndent();
+        // TBD should this be a "new" call?
+        builder->appendFormat("%s %s = %s(", ty->toString(), di->name.name, ty->toString());
+        bool first = true;
+        for (const IR::Argument* arg : *di->arguments->getEnumerator()) {
+            if (!first) builder->append(", ");
+            first = false;
+            if (arg->expression->is<IR::Constant>() ||
+                arg->expression->is<IR::BoolLiteral>()) {
+                // toString does the right thing, for ints and bools anyway.
+                builder->append(arg->expression->toString());
+            } else {
+                ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "extern constructor arguments must be constant");
+            }
+        }
+
+        builder->append(")");
+        builder->endOfStatement(true);
+
         return;
     } else if (decl->is<IR::P4Table>() || decl->is<IR::P4Action>() ||
                decl->is<IR::Declaration_Instance>()) {

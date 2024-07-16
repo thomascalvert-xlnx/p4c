@@ -552,6 +552,32 @@ void StateTranslationVisitor::compileExtract(const IR::Expression *destination,
     builder->newline();
 }
 
+void StateTranslationVisitor::processCustomExternMethod(const P4::ExternMethod *method)
+{
+    if (!state->parser->emitExterns)
+        ::error(ErrorType::ERR_UNSUPPORTED, "%1%: Not supported (did you forget --emit-externs ?)",
+            method->method);
+
+    // Custom extern objects: this visit() call will emit "objName.methodName".
+    builder->emitIndent();
+    visit(method->expr->method);
+    builder->append("(");
+    bool first = true;
+
+    for (auto p : *method->substitution.getParametersInArgumentOrder()) {
+        if (!first) builder->append(", ");
+        first = false;
+        auto arg = method->substitution.lookup(p);
+        if (p->direction == IR::Direction::Out || p->direction == IR::Direction::InOut) {
+            builder->append("&");
+        }
+        visit(arg);
+    }
+
+    builder->append(")");
+    builder->endOfStatement(true);
+}
+
 void StateTranslationVisitor::processFunction(const P4::ExternFunction *function) {
     if (function->method->name.name == IR::ParserState::verify) {
         compileVerify(function->expr);
@@ -581,10 +607,10 @@ void StateTranslationVisitor::processMethod(const P4::ExternMethod *method) {
             compileAdvance(method);
             return;
         }
-        BUG("Unhandled packet method %1%", expression->method);
+//        BUG("Unhandled packet method %1%", expression->method);
     }
 
-    ::error(ErrorType::ERR_UNEXPECTED, "Unexpected extern method call in parser %1%", expression);
+    processCustomExternMethod(method);
 }
 
 bool StateTranslationVisitor::preorder(const IR::MethodCallExpression *expression) {
@@ -650,7 +676,8 @@ EBPFParser::EBPFParser(const EBPFProgram *program, const IR::ParserBlock *block,
       parserBlock(block),
       packet(nullptr),
       headers(nullptr),
-      headerType(nullptr) {
+      headerType(nullptr),
+      emitExterns(program->options.emitExterns) {
     visitor = new StateTranslationVisitor(program->refMap, program->typeMap);
 }
 
@@ -665,6 +692,29 @@ void EBPFParser::emitDeclaration(CodeBuilder *builder, const IR::Declaration *de
                   decl);
         return;
     } else if (decl->is<IR::P4ValueSet>()) {
+        return;
+    } else if (decl->is<IR::Declaration_Instance>()) {
+        const IR::Declaration_Instance* di = decl->to<IR::Declaration_Instance>();
+        const IR::Type* ty = di->getType();
+        builder->emitIndent();
+        // TBD should this be a "new" call?
+        builder->appendFormat("%s %s = %s(", ty->toString(), di->name.name, ty->toString());
+        bool first = true;
+        for (const IR::Argument* arg : *di->arguments->getEnumerator()) {
+            if (!first) builder->append(", ");
+            first = false;
+            if (arg->expression->is<IR::Constant>() ||
+                arg->expression->is<IR::BoolLiteral>()) {
+                // toString does the right thing, for ints and bools anyway.
+                builder->append(arg->expression->toString());
+            } else {
+                ::error(ErrorType::ERR_UNSUPPORTED_ON_TARGET, "extern constructor arguments must be constant");
+            }
+        }
+
+        builder->append(")");
+        builder->endOfStatement(true);
+
         return;
     }
     BUG("%1%: not yet handled", decl);
